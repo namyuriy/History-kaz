@@ -1,9 +1,10 @@
 name: render
+run-name: render ${{ inputs.run_key }}
 on:
   workflow_dispatch:
     inputs:
-      payload_url:
-        description: "URL JSON-пейлоада (topic_title, files, script, out)"
+      payload_b64:
+        description: "base64 JSON (topic_title, files, script, out)"
         required: true
       run_key:
         required: true
@@ -14,10 +15,13 @@ jobs:
     steps:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
-      - name: Fetch payload and files
+      - name: Decode payload
         run: |
-          mkdir work && cd work
-          curl -fsSL "${{ inputs.payload_url }}" -o payload.json
+          mkdir work
+          echo '${{ inputs.payload_b64 }}' | base64 -d > work/payload.json
+      - name: Fetch files
+        run: |
+          cd work
           jq -r '.script' payload.json > run.sh
           jq -c '.files[]' payload.json | while read -r f; do
             curl -fsSL "$(echo "$f" | jq -r .url)" -o "$(echo "$f" | jq -r .name)"
