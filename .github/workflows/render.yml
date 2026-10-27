@@ -4,14 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       payload_b64:
-        description: "base64 JSON (topic_title, files, script, out)"
+        description: "base64 JSON"
         required: true
       run_key:
         required: true
+permissions:
+  contents: write
 jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
@@ -26,14 +30,32 @@ jobs:
           jq -c '.files[]' payload.json | while read -r f; do
             curl -fsSL "$(echo "$f" | jq -r .url)" -o "$(echo "$f" | jq -r .name)"
           done
+          TAG=$(jq -r '.release_tag' payload.json)
+          for n in $(jq -r '.release_files[]' payload.json); do
+            gh release download "$TAG" -R "${{ github.repository }}" -p "$n" -D .
+          done
       - name: Render
         run: cd work && bash run.sh
+      - name: Save to release
+        run: |
+          cd work
+          TAG=$(jq -r '.release_tag' payload.json)
+          OUT=$(jq -r '.out' payload.json)
+          DELIVER=$(jq -r '.deliver' payload.json)
+          if [ "$DELIVER" != "true" ]; then
+            gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1 || \
+              gh release create "$TAG" -R "${{ github.repository }}" --title "$TAG" --notes "render temp" --prerelease
+            gh release upload "$TAG" "$OUT" -R "${{ github.repository }}" --clobber
+          fi
       - name: Output
         run: |
           cd work
-          OUT=$(jq -r '.out' payload.json)
-          mkdir ../result && cp "$OUT" ../result/
+          if [ "$(jq -r '.deliver' payload.json)" = "true" ]; then
+            OUT=$(jq -r '.out' payload.json)
+            mkdir ../result && cp "$OUT" ../result/
+          fi
       - uses: actions/upload-artifact@v4
+        if: ${{ fromJSON(inputs.payload_b64 != '') && hashFiles('result/*') != '' }}
         with:
           name: render-${{ inputs.run_key }}
           path: result/*
